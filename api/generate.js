@@ -68,7 +68,7 @@ export default async function handler(req, res) {
       }
     );
 
-    console.log("Replicate API Response:", output);
+    console.log("Replicate API Response:", JSON.stringify(output, null, 2)); // Log full response
 
     // Cleanup temp file
     try {
@@ -78,14 +78,17 @@ export default async function handler(req, res) {
     }
 
     if (!output || !Array.isArray(output)) {
-      console.error("Invalid output format:", output);
+      console.error("Invalid output format:", JSON.stringify(output, null, 2));
       throw new Error("Invalid response from image generation API");
     }
 
     return res.status(200).json({ images: output });
 
   } catch (error) {
-    console.error("Error in generate endpoint:", error);
+    console.error("Error in generate endpoint:", {
+      message: error.message,
+      stack: error.stack
+    });
     return res.status(500).json({ 
       error: "Error generating image", 
       details: error.message 
