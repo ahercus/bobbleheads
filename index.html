@@ -49,11 +49,12 @@
                 reader.onload = function(e) {
                     imagePreview.innerHTML = `<img src="${e.target.result}" alt="Preview" class="preview-img">`;
                     imagePreview.classList.remove("hidden");
-                }
+                };
                 reader.readAsDataURL(file);
             }
         });
 
+        // Handle form submission
         form.addEventListener("submit", async (e) => {
             e.preventDefault();
 
@@ -69,49 +70,59 @@
             feedback.textContent = "Generating your bobblehead...";
 
             try {
-                const formData = new FormData();
-                formData.append('imageUpload', fileInput.files[0]);
+                const file = fileInput.files[0];
+                const reader = new FileReader();
 
-                const response = await fetch("/api/generate", {
-                    method: "POST",
-                    body: formData,
-                });
+                reader.onloadend = async () => {
+                    const base64Image = reader.result;
 
-                if (!response.ok) {
-                    throw new Error("Server returned a non-OK response.");
-                }
+                    // Step 1: Start Prediction
+                    const startResponse = await fetch("/api/predictions", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify({
+                            prompt: "Full body bobblehead on display stand, tiny body with oversized head...",
+                            image: base64Image,
+                        }),
+                    });
 
-                const data = await response.json();
-                console.log("Raw API Response:", JSON.stringify(data, null, 2));
-                
-                if (!data.images || data.images.length === 0) {
-                    throw new Error("No images were generated");
-                }
+                    const prediction = await startResponse.json();
 
-                console.log("Generated image URLs:", data.images);
-                data.images.forEach((url) => {
-                    const imgEl = document.createElement("img");
-                    imgEl.src = url;
-                    imgEl.alt = "Generated Bobblehead";
-                    imgEl.className = "output-image";
-                    result.appendChild(imgEl);
-                });
-
-                feedback.textContent = "Done!";
-            } catch (err) {
-                const errorMessage = err.message || "Error generating image. Please try again.";
-                feedback.textContent = errorMessage;
-                console.error("Error details:", err);
-                
-                // If we got a response from the server, log its content
-                if (err.response) {
-                    try {
-                        const errorText = await err.response.text();
-                        console.error("Server error response:", errorText);
-                    } catch (e) {
-                        console.error("Could not read error response");
+                    if (startResponse.status !== 201) {
+                        throw new Error(prediction.detail || "Error starting prediction.");
                     }
-                }
+
+                    // Step 2: Poll for Status
+                    let status = prediction.status;
+                    while (status !== "succeeded" && status !== "failed") {
+                        await new Promise((resolve) => setTimeout(resolve, 1000));
+                        const pollResponse = await fetch(`/api/predictions/${prediction.id}`);
+                        const updatedPrediction = await pollResponse.json();
+                        status = updatedPrediction.status;
+
+                        if (status === "succeeded") {
+                            const imgEl = document.createElement("img");
+                            imgEl.src = updatedPrediction.output[0]; // Assuming a single output
+                            imgEl.alt = "Generated Bobblehead";
+                            imgEl.className = "output-image";
+                            result.appendChild(imgEl);
+                            feedback.textContent = "Done!";
+                            loader.classList.add("hidden");
+                            return;
+                        }
+                    }
+
+                    if (status === "failed") {
+                        throw new Error("Prediction failed. Please try again.");
+                    }
+                };
+
+                reader.readAsDataURL(file);
+            } catch (err) {
+                feedback.textContent = err.message || "Error generating image. Please try again.";
+                console.error("Error details:", err);
             } finally {
                 loader.classList.add("hidden");
             }
